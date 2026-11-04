@@ -9,7 +9,7 @@ This method decides whether an image contains **at least one person without a he
 3. **Focus view (when available).** Recheck a crop around a candidate violation, or highlight helmet-related regions if the original view has related detections but no violation candidate. Map crop detections back to the original coordinates for comparison.
 4. **Selective routing.** Apply confidence gates and a risk score based on label disagreement, confidence drops, weak box overlap, and possible missed violations. Return an image-level decision when the rules support it; otherwise output `uncertain` and add the image to the review queue.
 
-The original workflow sent only queued images to a vision-language model. This release implements the local detector and routing stages and can merge optional offline review decisions from a CSV. It does not call a hosted model, include the original review responses, or ship any weights.
+The integrated pipeline can automatically send only uncertain images to a vision-language model (VLM), then merge the results in the same run. It uses the full stress view for review, falling back to the original image if needed. VLM review is opt-in: no project endpoint, credentials, original review responses, or model weights are included.
 
 ## Reproduce the PPE2286 experiments
 
@@ -58,8 +58,23 @@ Each evaluation writes per-image decisions, the uncertain-image queue, and count
 
 With `--method single`, the default strict evaluation treats images with no predicted `Helmet` or `NoHelmet` as uncertain. Add `--force-binary` for a separate two-outcome baseline: any predicted `NoHelmet` means violation, and all other images are predicted compliant, even if no helmet-related box was detected. Report the policy with the scores; absence of a detection does not establish compliance.
 
+## Run the integrated YOLO + VLM pipeline
+
+Use your own vision-capable, OpenAI-compatible Chat Completions server. Configure the following environment variables in your shell or secret manager, not in source files:
+
+- `HELMET_VLM_BASE_URL`: Base URL including any version prefix (for example, `http://127.0.0.1:8000/v1` for your own local server). The client appends `/chat/completions`. Use HTTPS for non-loopback servers.
+- `HELMET_VLM_MODEL`: The vision model identifier on that server.
+- `HELMET_VLM_API_KEY`: Optional bearer token, required only if your server requires authentication.
+
+```sh
+python evaluate.py --model runs/yolov8s_e100_b16_640/weights/best.pt --method three-view --vlm-review --out runs/eval_v8_vlm
+python helmet_pipeline.py --model PATH_TO_BEST_PT --image PATH_TO_IMAGE --device 0 --vlm-review
+```
+
+Only uncertain cases are sent, and only to the configured server. For dataset evaluation, excluded images are not sent either. Requests contain the review image and helmet task prompt, not ground-truth labels. With a remote server, enabling this flag transmits image data to that server. Failed, malformed or inconclusive responses remain `uncertain`. `metrics.json` reports before/after scores and review statuses; `per_image.csv` preserves both decisions. The exact historical scores are not guaranteed: the selected VLM, prompt adaptation, and newly trained weights can affect results.
+
 ## Optional: offline review
 
-The three-view pipeline retains its original uncertainty routing. To evaluate a separate review, copy `review_queue.csv`, fill its `decision` column with `ok`, `violation`, or `uncertain`, and pass the copy as `--reviews` in a new evaluation. Only uncertain predictions may be replaced. Reviewers should not see ground-truth labels. No review responses are included, so the previous cloud-reviewed results are not reproduced by the local-only commands. New training runs can also differ numerically from the historical runs.
+To merge a separate review instead of using `--vlm-review`, copy `review_queue.csv`, fill its `decision` column with `ok`, `violation`, or `uncertain`, and pass the copy as `--reviews` in a new evaluation. Only uncertain predictions may be replaced. Reviewers should not see ground-truth labels.
 
 Code: [AGPL-3.0](LICENSE). Dataset: [CC BY 4.0](DATASET.md).

@@ -18,6 +18,23 @@ BBox = List[float]
 DetectionResult = Dict[str, Any]
 
 
+def apply_vlm_review(result, reviewer, image, stress_image=None):
+    if reviewer is None or result['decision'] != 'uncertain':
+        return result
+    use_stress = stress_image is not None and stress_image.size > 0
+    decision, status = reviewer.review(stress_image if use_stress else image)
+    return {
+        **result,
+        'small_model_decision': 'uncertain',
+        'decision': 'no_violation' if decision == 'ok' else decision,
+        'decision_source': 'large_model',
+        'has_violation': None if decision == 'uncertain' else decision == 'violation',
+        'need_manual_review': decision == 'uncertain',
+        'review_status': status,
+        'review_view': 'stress' if use_stress else 'original',
+    }
+
+
 @dataclass(frozen=True)
 class AlgRule:
     alg_code: str
@@ -748,7 +765,8 @@ class AnJianDetection:
         }
 
 
-    def detect(self, alg_code: str, image, clean_image=None, noise_sigma: Optional[float] = None) -> Dict[str, Any]:
+    def detect(self, alg_code: str, image, clean_image=None, noise_sigma: Optional[float] = None,
+               *, reviewer=None) -> Dict[str, Any]:
         rule = self.get_rule(alg_code)
         self._debug(f'[detect_start] alg_code={alg_code}, description={rule.description}')
         if clean_image is None:
@@ -829,6 +847,7 @@ class AnJianDetection:
                 'uncertainty_info': risk_info,
                 'saved_view_paths': {},
             }
+            result_payload = apply_vlm_review(result_payload, reviewer, image)
             self._log_final_decision(result_payload)
             return result_payload
 
@@ -887,7 +906,6 @@ class AnJianDetection:
         self._log_risk(alg_code, risk_info)
 
         if risk_info['needs_review']:
-
             result_payload = {
                 'decision': 'uncertain',
                 'has_violation': None,
@@ -898,6 +916,7 @@ class AnJianDetection:
                 'uncertainty_info': risk_info,
                 'saved_view_paths': saved_view_paths,
             }
+            result_payload = apply_vlm_review(result_payload, reviewer, image, stress_image)
             self._log_final_decision(result_payload)
             return result_payload
 
@@ -946,9 +965,18 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='0')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--model', type=str, required=True)
+    parser.add_argument('--vlm-review', action='store_true', help='Review uncertain results with a configured VLM.')
     args = parser.parse_args()
 
+    reviewer = None
+    if args.vlm_review:
+        from vlm_review import VisionReviewer
+
+        try:
+            reviewer = VisionReviewer.from_environment()
+        except ValueError as exc:
+            parser.error(str(exc))
     detector = AnJianDetection(gpu_device=args.device, debug_logging=args.debug, save_aux_images=False, model_path=args.model)
     image = load_image(args.image)
-    result = detector.detect(args.alg_code, image)
+    result = detector.detect(args.alg_code, image, reviewer=reviewer)
     print(json.dumps(result, ensure_ascii=False, indent=2))
