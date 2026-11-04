@@ -1,0 +1,17 @@
+__pycache__/
+.venv/
+.ultralytics/
+data/
+runs/
+saved_multi_view_images/
+_artifacts/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.onnx
+*.engine
+*.npy
+*.cache
+*.zip
+.env*
