@@ -39,7 +39,9 @@ python evaluate.py --model runs/yolov8s_e100_b16_640/weights/best.pt --method th
 
 Repeat for `yolo11s` and `yolo26s`, using each actual checkpoint path and a new output directory. To predict a single image with the three-view pipeline, run `python helmet_pipeline.py --model PATH_TO_BEST_PT --image PATH_TO_IMAGE --device 0`.
 
-Each evaluation writes per-image decisions, the uncertain-image queue, and counts and scores. Violation is the positive class. Accuracy counts uncertain outcomes as incorrect over all evaluable images. Precision, recall and F1 are macro averages over compliant and violation; an uncertain outcome is a missed instance of its true class, and is never converted to compliant.
+Each evaluation writes per-image decisions, the uncertain-image queue, and counts and scores. The fixed test split has 227 images: 117 compliant, 62 violation and 48 excluded because their labels contain neither `Helmet` nor `NoHelmet`. Violation is the positive class. Accuracy counts uncertain outcomes as incorrect over all evaluable images. Precision, recall and F1 are macro averages over compliant and violation; an uncertain outcome is a missed instance of its true class.
+
+With `--method single`, the default strict evaluation treats images with no predicted `Helmet` or `NoHelmet` as uncertain. Add `--force-binary` for a separate two-outcome baseline: any predicted `NoHelmet` means violation, and all other images are predicted compliant, even if no helmet-related box was detected. Report the policy with the scores; absence of a detection does not establish compliance.
 
 ## Optional: offline review
 

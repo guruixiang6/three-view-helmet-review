@@ -82,7 +82,9 @@ def infer(args, rows, images):
                     raise RuntimeError(f"Unexpected inference output: {name}")
                 seen.add(name)
                 ids = set(result.boxes.cls.tolist())
-                by_name[name]["prediction"] = "violation" if 1 in ids else "ok" if 0 in ids else "uncertain"
+                by_name[name]["prediction"] = (
+                    "violation" if 1 in ids else "ok" if 0 in ids or args.force_binary else "uncertain"
+                )
         if seen != by_name.keys():
             raise RuntimeError("The detector did not return a prediction for every image")
     else:
@@ -106,6 +108,8 @@ def main():
     parser.add_argument("--data", type=Path, default=DATA)
     parser.add_argument("--device", default="0")
     parser.add_argument("--batch", type=int, default=16, help="Single-view inference batch size.")
+    parser.add_argument("--force-binary", action="store_true",
+                        help="Single-view only: predict ok whenever no NoHelmet box is detected.")
     parser.add_argument("--out", type=Path, required=True, help="New output directory.")
     parser.add_argument("--reviews", type=Path, help="Optional local CSV: image,decision.")
     parser.add_argument("--limit", type=int, help="Smoke test only: evaluate the first N images.")
@@ -116,13 +120,16 @@ def main():
         parser.error(f"Refusing to overwrite {args.out}")
     if args.batch < 1 or (args.limit is not None and args.limit < 1):
         parser.error("--batch and --limit must be positive")
+    if args.force_binary and args.method != "single":
+        parser.error("--force-binary is only supported with --method single")
     images, labels = inventory(args.data, "test")
     paths = sorted(images.values())[:args.limit]
     rows = [dict(image=p.name, truth=ground_truth(labels[p.stem]), route_reason="") for p in paths]
     infer(args, rows, paths)
     for row in rows:
         row["final_prediction"] = row["prediction"]
-    report = dict(method=args.method, checkpoint=str(args.model), smoke_test=args.limit is not None,
+    report = dict(method=args.method, force_binary=args.force_binary,
+                  checkpoint=str(args.model), smoke_test=args.limit is not None,
                   before_review=metrics(rows, "prediction"))
     if args.reviews:
         with args.reviews.open(encoding="utf-8-sig", newline="") as f:
